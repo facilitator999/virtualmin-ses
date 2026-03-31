@@ -23,16 +23,16 @@ my @errors;
 
 # Step 1: Backup DNS
 print "<p>$text{'enable_backup'}";
-my $cf_zone = undef;
+my ($cf_zone, $cf_zone_name);
 if ($config{'cf_api_token'}) {
-    $cf_zone = cf_get_zone_for_domain($dom);
+    ($cf_zone, $cf_zone_name) = cf_get_zone_for_domain($dom);
 }
 if ($cf_zone) {
-    my $backup_result = backup_domain_dns($dom, $cf_zone);
-    if ($backup_result->{'ok'}) {
+    my $backup = backup_domain_dns($dom, $cf_zone);
+    if ($backup) {
         print " <span style='color:green'>&#10003;</span></p>";
     } else {
-        print " <span style='color:orange'>&#9888;</span> $backup_result->{'error'}</p>";
+        print " <span style='color:orange'>&#9888;</span> backup failed</p>";
     }
 } else {
     print " <span style='color:grey'>(non-Cloudflare — skipped)</span></p>";
@@ -40,83 +40,81 @@ if ($cf_zone) {
 
 # Step 2: Create SES identity
 print "<p>$text{'enable_create'}";
-my $identity_result;
+my ($identity_data, $identity_err);
 if (ses_identity_exists($dom)) {
     print " $text{'enable_err_exists'}";
-    $identity_result = ses_get_identity($dom);
+    ($identity_data, $identity_err) = ses_get_identity($dom);
 } else {
-    $identity_result = ses_create_identity($dom);
+    ($identity_data, $identity_err) = ses_create_identity($dom);
 }
 
-if ($identity_result->{'ok'}) {
+if (!$identity_err && $identity_data) {
     print " <span style='color:green'>&#10003;</span></p>";
 } else {
-    my $err = $identity_result->{'error'};
     print " <span style='color:red'>&#10007;</span></p>";
-    print "<p style='color:red'>" . &text('enable_err_create', $err) . "</p>";
+    print "<p style='color:red'>" . &text('enable_err_create', $identity_err) . "</p>";
     ui_print_footer("index.cgi", $text{'index_title'});
     exit;
 }
 
 # Step 3: Get DKIM tokens
 print "<p>$text{'enable_dkim'}";
-my @dkim_tokens = @{$identity_result->{'dkim_tokens'} || []};
+my @dkim_tokens;
+if ($identity_data->{'DkimAttributes'} && $identity_data->{'DkimAttributes'}{'Tokens'}) {
+    @dkim_tokens = @{$identity_data->{'DkimAttributes'}{'Tokens'}};
+}
+unless (@dkim_tokens) {
+    my ($tokens, $terr, $tstatus) = ses_get_dkim_tokens($dom);
+    @dkim_tokens = @{$tokens || []};
+}
 if (@dkim_tokens) {
     print " <span style='color:green'>&#10003;</span> (" . scalar(@dkim_tokens) . " tokens)</p>";
 } else {
-    # Try fetching separately
-    my $dkim_result = ses_get_dkim_tokens($dom);
-    @dkim_tokens = @{$dkim_result->{'tokens'} || []};
-    if (@dkim_tokens) {
-        print " <span style='color:green'>&#10003;</span> (" . scalar(@dkim_tokens) . " tokens)</p>";
-    } else {
-        print " <span style='color:orange'>&#9888;</span> No DKIM tokens returned</p>";
-    }
+    print " <span style='color:orange'>&#9888;</span> No DKIM tokens returned</p>";
 }
 
 # Step 4: Push DNS records (if Cloudflare)
 if ($cf_zone) {
     print "<p>$text{'enable_dns'}";
     my $dns_ok = 1;
-    my @rollback;
 
     # DKIM CNAMEs
     foreach my $token (@dkim_tokens) {
         my $name = "${token}._domainkey.${dom}";
         my $value = "${token}.dkim.amazonses.com";
-        my $result = cf_ensure_dns_record($cf_zone, 'CNAME', $name, $value);
-        if ($result->{'ok'}) {
-            push @rollback, $result->{'id'};
-        } else {
+        my ($status, $id_or_err) = cf_ensure_dns_record($cf_zone, 'CNAME', $name, $value);
+        if ($status eq 'error') {
             $dns_ok = 0;
-            push @errors, "DKIM CNAME: $result->{'error'}";
+            push @errors, "DKIM CNAME: $id_or_err";
         }
     }
 
     # SPF merge
-    my $spf_result = merge_spf_record($dom, $cf_zone);
-    if (!$spf_result->{'ok'}) {
-        push @errors, "SPF: $spf_result->{'error'}" unless $spf_result->{'skipped'};
+    my ($spf_status, $spf_id, @spf_warnings) = merge_spf_record($dom, $cf_zone);
+    if ($spf_status eq 'error') {
+        push @errors, "SPF: $spf_id";
+    }
+    foreach my $w (@spf_warnings) {
+        print "<br><small style='color:orange'>&#9888; $w</small>";
     }
 
     # DMARC (only if none exists)
     my $dmarc_rec = build_dmarc_record($dom);
-    my @existing_dmarc = @{cf_list_dns_records($cf_zone, 'TXT', "_dmarc.$dom") || []};
+    my @existing_dmarc = cf_list_dns_records($cf_zone, 'TXT', "_dmarc.$dom");
     if (!@existing_dmarc) {
-        my $dmarc_result = cf_ensure_dns_record($cf_zone, 'TXT', "_dmarc.$dom", $dmarc_rec);
-        if (!$dmarc_result->{'ok'}) {
-            push @errors, "DMARC: $dmarc_result->{'error'}";
+        my ($dmarc_status, $dmarc_id) = cf_ensure_dns_record($cf_zone, 'TXT', "_dmarc.$dom", $dmarc_rec);
+        if ($dmarc_status eq 'error') {
+            push @errors, "DMARC: $dmarc_id";
         }
     }
 
     if ($dns_ok && !@errors) {
         print " <span style='color:green'>&#10003;</span></p>";
-    } elsif (@errors) {
+    } else {
         print " <span style='color:red'>&#10007;</span></p>";
         foreach my $err (@errors) {
             print "<p style='color:red'>" . &text('enable_err_dns', $err) . "</p>";
         }
-        # Don't exit — still set up transport so it can be fixed later
     }
 } else {
     # Non-Cloudflare domain
@@ -136,29 +134,16 @@ if ($cf_zone) {
 # Step 5: Add to Postfix transport map
 print "<p>$text{'enable_transport'}";
 my $pf_status = get_postfix_ses_status();
-if (!$pf_status->{'routing'}) {
-    # One-time Postfix setup
-    my $pf_result = configure_postfix_ses($region);
-    if (!$pf_result->{'ok'}) {
-        print " <span style='color:red'>&#10007;</span> Postfix setup failed: $pf_result->{'error'}</p>";
-        push @errors, "Postfix: $pf_result->{'error'}";
-    }
+if (!$pf_status->{'routing_configured'}) {
+    configure_postfix_ses($region);
 }
-my $transport_result = add_domain_to_transport($dom);
-if ($transport_result->{'ok'}) {
-    print " <span style='color:green'>&#10003;</span></p>";
-} else {
-    print " <span style='color:red'>&#10007;</span> $transport_result->{'error'}</p>";
-}
+add_domain_to_transport($dom);
+print " <span style='color:green'>&#10003;</span></p>";
 
 # Step 6: Disable OpenDKIM for this domain
 print "<p>$text{'enable_opendkim'}";
-my $dkim_result = disable_opendkim_for_domain($dom);
-if ($dkim_result->{'ok'}) {
-    print " <span style='color:green'>&#10003;</span></p>";
-} else {
-    print " <span style='color:grey'>(skipped: $dkim_result->{'error'})</span></p>";
-}
+disable_opendkim_for_domain($dom);
+print " <span style='color:green'>&#10003;</span></p>";
 
 # Save state
 save_domain_state($dom, {

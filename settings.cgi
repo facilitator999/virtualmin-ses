@@ -12,32 +12,34 @@ my %c = %config;
 # Test AWS if credentials exist
 my ($aws_ok, $aws_msg, $ses_status, $ses_quota, $ses_rate, $ses_sandbox);
 if ($c{'aws_access_key'} && $c{'aws_secret_key'}) {
-    my $result = ses_test_credentials();
-    if ($result->{'ok'}) {
+    my ($data, $err) = ses_test_credentials();
+    if (!$err && $data) {
         $aws_ok = 1;
-        $ses_status = $result->{'production'} ? 'Production' : 'Sandbox';
-        $ses_sandbox = !$result->{'production'};
-        $ses_quota = $result->{'max24hr'} || 'Unknown';
-        $ses_rate = $result->{'max_per_sec'} || 'Unknown';
+        $ses_status = $data->{'ProductionAccessEnabled'} ? 'Production' : 'Sandbox';
+        $ses_sandbox = !$data->{'ProductionAccessEnabled'};
+        if ($data->{'SendQuota'}) {
+            $ses_quota = $data->{'SendQuota'}{'Max24HourSend'} || 'Unknown';
+            $ses_rate = $data->{'SendQuota'}{'MaxSendRate'} || 'Unknown';
+        }
         $aws_msg = "Connected ($c{'aws_region'})";
     } else {
         $aws_ok = 0;
-        $aws_msg = $result->{'error'} || 'Connection failed';
+        $aws_msg = $err || 'Connection failed';
     }
 }
 
 # Test Cloudflare if token exists
 my ($cf_ok, $cf_msg, $cf_zones, $cf_expiry);
 if ($c{'cf_api_token'}) {
-    my $result = cf_test_credentials();
-    if ($result->{'ok'}) {
+    my ($ok, $err, $zones) = cf_test_credentials();
+    if ($ok && !$err) {
         $cf_ok = 1;
-        $cf_zones = $result->{'zones'};
-        $cf_expiry = $result->{'expiry'} || 'Never';
+        $cf_zones = $zones || 0;
+        $cf_expiry = 'Never';
         $cf_msg = "Valid";
     } else {
         $cf_ok = 0;
-        $cf_msg = $result->{'error'} || 'Connection failed';
+        $cf_msg = $err || 'Connection failed';
     }
 }
 
@@ -50,15 +52,34 @@ print &ui_form_start("settings_save.cgi", "post");
 # AWS SES section
 print &ui_table_start($text{'settings_aws_header'}, "width=100%", 2);
 
+# Inline help for getting AWS credentials
+my $aws_help = <<'HTML';
+<div style="background:#e8f4fd;border:1px solid #bee5eb;border-radius:4px;padding:10px;margin-bottom:10px;font-size:13px;color:#0c5460">
+<b>How to get these credentials:</b><br>
+1. Log into <a href="https://console.aws.amazon.com/iam/" target="_blank">AWS Console &rarr; IAM</a><br>
+2. Left sidebar &rarr; <b>Users</b> &rarr; <b>Create user</b><br>
+3. Name it <code>virtualmin-ses</code> &rarr; Next<br>
+4. Select <b>Attach policies directly</b> &rarr; search <code>AmazonSESFullAccess</code> &rarr; tick it &rarr; Create user<br>
+5. Click the new user &rarr; <b>Security credentials</b> tab &rarr; <b>Create access key</b><br>
+6. Choose <b>Application running outside AWS</b> &rarr; Create<br>
+7. Copy both the <b>Access Key ID</b> (starts with AKIA...) and <b>Secret Access Key</b> below<br>
+<i>Note: The Secret Key is only shown once — save it somewhere safe.</i>
+</div>
+HTML
+print &ui_table_row(undef, $aws_help, 2);
+
 print &ui_table_row($text{'settings_aws_key'},
-    &ui_textbox("aws_access_key", $c{'aws_access_key'}, 40));
+    &ui_textbox("aws_access_key", $c{'aws_access_key'}, 40) .
+    " <small style='color:#666'>Starts with AKIA...</small>");
 
 print &ui_table_row($text{'settings_aws_secret'},
-    &ui_textbox("aws_secret_key", $c{'aws_secret_key'}, 50, 0, undef, "type=password"));
+    &ui_textbox("aws_secret_key", $c{'aws_secret_key'}, 50, 0, undef, "type=password") .
+    " <small style='color:#666'>Shown only once when created</small>");
 
 my @regions = ('us-east-1', 'us-west-2', 'eu-west-1', 'eu-central-1', 'ap-south-1', 'ap-southeast-2');
 print &ui_table_row($text{'settings_aws_region'},
-    &ui_select("aws_region", $c{'aws_region'}, \@regions));
+    &ui_select("aws_region", $c{'aws_region'}, \@regions) .
+    " <small style='color:#666'>Must match the region where SES is set up</small>");
 
 if ($c{'aws_access_key'} && $c{'aws_secret_key'}) {
     my $status_icon = $aws_ok ? "<span style='color:green'>&#10003;</span>" : "<span style='color:red'>&#10007;</span>";
@@ -77,6 +98,20 @@ print &ui_table_end();
 # Cloudflare section
 print &ui_table_start($text{'settings_cf_header'}, "width=100%", 2);
 
+my $cf_help = <<'HTML';
+<div style="background:#e8f4fd;border:1px solid #bee5eb;border-radius:4px;padding:10px;margin-bottom:10px;font-size:13px;color:#0c5460">
+<b>How to get a Cloudflare API Token:</b><br>
+1. Log into <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank">Cloudflare &rarr; My Profile &rarr; API Tokens</a><br>
+2. Click <b>Create Token</b><br>
+3. Use the <b>Edit zone DNS</b> template<br>
+4. Under Zone Resources, select <b>All zones</b> (or pick specific ones)<br>
+5. Click <b>Continue to summary</b> &rarr; <b>Create Token</b><br>
+6. Copy the token and paste it below<br>
+<i>Note: The token needs DNS edit permissions for all zones you want to manage.</i>
+</div>
+HTML
+print &ui_table_row(undef, $cf_help, 2);
+
 print &ui_table_row($text{'settings_cf_token'},
     &ui_textbox("cf_api_token", $c{'cf_api_token'}, 50, 0, undef, "type=password"));
 
@@ -94,8 +129,18 @@ print &ui_table_end();
 # Email defaults section
 print &ui_table_start($text{'settings_defaults_header'}, "width=100%", 2);
 
+my $defaults_help = <<'HTML';
+<div style="background:#f0f0f0;border:1px solid #ddd;border-radius:4px;padding:10px;margin-bottom:10px;font-size:13px;color:#555">
+These defaults are used when enabling SES for a domain. You usually don't need to change them.
+SPF tells email providers that Amazon is authorised to send on your behalf.
+DMARC tells providers what to do with emails that fail authentication checks.
+</div>
+HTML
+print &ui_table_row(undef, $defaults_help, 2);
+
 print &ui_table_row($text{'settings_spf'},
-    &ui_textbox("spf_include", $c{'spf_include'} || 'amazonses.com', 30));
+    &ui_textbox("spf_include", $c{'spf_include'} || 'amazonses.com', 30) .
+    " <small style='color:#666'>Leave as default unless told otherwise</small>");
 
 my @policies = (['none', 'none - Monitoring only'],
                 ['quarantine', 'quarantine - Mark suspicious'],
@@ -105,7 +150,8 @@ print &ui_table_row($text{'settings_dmarc_policy'},
         [map { [$_->[0], $_->[1]] } @policies]));
 
 print &ui_table_row($text{'settings_dmarc_rua'},
-    &ui_textbox("dmarc_rua", $c{'dmarc_rua'}, 40));
+    &ui_textbox("dmarc_rua", $c{'dmarc_rua'}, 40) .
+    " <small style='color:#666'>e.g. dmarc-reports\@yourdomain.com — leave blank to skip</small>");
 
 my $server_ip = get_server_ip();
 print &ui_table_row($text{'settings_server_ip'}, $server_ip);
@@ -120,16 +166,16 @@ my $icon_warn = "<span style='color:orange'>&#9888;</span>";
 my $icon_no = "<span style='color:grey'>&#8212;</span>";
 
 print &ui_table_row($text{'settings_postfix_routing'},
-    ($pf_status->{'routing'} ? "$icon_ok Configured (sender_dependent_relayhost_maps)" : "$icon_no Not configured"));
+    ($pf_status->{'routing_configured'} ? "$icon_ok Configured (sender_dependent_relayhost_maps)" : "$icon_no Not configured"));
 
 print &ui_table_row($text{'settings_postfix_sasl'},
-    ($pf_status->{'sasl'} ? "$icon_ok Configured" : "$icon_no Not configured"));
+    ($pf_status->{'sasl_configured'} ? "$icon_ok Configured" : "$icon_no Not configured"));
 
 print &ui_table_row($text{'settings_postfix_tls'},
-    ($pf_status->{'tls'} ? "$icon_ok Configured" : "$icon_no Not configured"));
+    ($pf_status->{'tls_level'} ? "$icon_ok Configured ($pf_status->{'tls_level'})" : "$icon_no Not configured"));
 
 print &ui_table_row($text{'settings_postfix_dane'},
-    ($pf_status->{'dane'} ? "$icon_ok Preserved for direct delivery" : "$icon_no Not configured"));
+    ($pf_status->{'dane_preserved'} ? "$icon_ok Preserved for direct delivery" : "$icon_no Not configured"));
 
 # Check OpenDKIM
 my $dkim_active = -f '/etc/opendkim.conf' ? 1 : 0;
@@ -143,11 +189,7 @@ print &ui_table_row($text{'settings_postfix_backup'},
 
 # Postfix config buttons
 my $pf_buttons = "";
-if (!$pf_status->{'routing'}) {
-    $pf_buttons .= &ui_submit($text{'settings_postfix_reconfig'}, "reconfig_postfix");
-} else {
-    $pf_buttons .= &ui_submit($text{'settings_postfix_reconfig'}, "reconfig_postfix") . " ";
-}
+$pf_buttons .= &ui_submit($text{'settings_postfix_reconfig'}, "reconfig_postfix") . " ";
 if (-f $backup_file) {
     $pf_buttons .= &ui_submit($text{'settings_postfix_restore'}, "restore_postfix");
 }

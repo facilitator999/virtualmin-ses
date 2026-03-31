@@ -15,8 +15,8 @@ if ($action eq 'showrecords') {
     # Show required DNS records for manual DNS domains
     my @dkim_tokens = @{$state->{'dkim_tokens'} || []};
     if (!@dkim_tokens) {
-        my $dkim_result = ses_get_dkim_tokens($dom);
-        @dkim_tokens = @{$dkim_result->{'tokens'} || []};
+        my ($tokens, $terr, $tstatus) = ses_get_dkim_tokens($dom);
+        @dkim_tokens = @{$tokens || []};
     }
 
     print "<p>Add these DNS records at your DNS provider:</p>";
@@ -26,9 +26,9 @@ if ($action eq 'showrecords') {
         print "<tr><td>CNAME</td><td>${token}._domainkey.${dom}</td><td>${token}.dkim.amazonses.com</td><td>OFF</td></tr>";
     }
     my $spf_val = build_spf_record($dom);
-    print "<tr><td>TXT</td><td>$dom</td><td>$spf_val</td><td>N/A</td></tr>";
+    print "<tr><td>TXT</td><td>$dom</td><td>$spf_val</td></tr>";
     my $dmarc_val = build_dmarc_record($dom);
-    print "<tr><td>TXT</td><td>_dmarc.$dom</td><td>$dmarc_val</td><td>N/A</td></tr>";
+    print "<tr><td>TXT</td><td>_dmarc.$dom</td><td>$dmarc_val</td></tr>";
     print "</table>";
 
     ui_print_footer("index.cgi", $text{'index_title'});
@@ -79,9 +79,9 @@ if ($ses_status->{'dkim'} eq 'PENDING') {
 if (!$ses_status->{'spf'}) {
     print "<p>" . &text('fix_spf_wrong', "include:" . ($config{'spf_include'} || 'amazonses.com'));
     if ($state->{'cf_zone'}) {
-        my $result = merge_spf_record($dom, $state->{'cf_zone'});
-        print $result->{'ok'} ? " <span style='color:green'>&#10003;</span>" : " <span style='color:red'>&#10007;</span> $result->{'error'}";
-        push @fixes, 'spf' if $result->{'ok'};
+        my ($status, $id, @warnings) = merge_spf_record($dom, $state->{'cf_zone'});
+        print($status ne 'error' ? " <span style='color:green'>&#10003;</span>" : " <span style='color:red'>&#10007;</span> $id");
+        push @fixes, 'spf' if $status ne 'error';
     }
     print "</p>";
 }
@@ -91,9 +91,9 @@ if (!$ses_status->{'dmarc'}) {
     print "<p>$text{'fix_dmarc_missing'}";
     if ($state->{'cf_zone'}) {
         my $dmarc_rec = build_dmarc_record($dom);
-        my $result = cf_ensure_dns_record($state->{'cf_zone'}, 'TXT', "_dmarc.$dom", $dmarc_rec);
-        print $result->{'ok'} ? " <span style='color:green'>&#10003;</span>" : " <span style='color:red'>&#10007;</span> $result->{'error'}";
-        push @fixes, 'dmarc' if $result->{'ok'};
+        my ($status, $id_or_err) = cf_ensure_dns_record($state->{'cf_zone'}, 'TXT', "_dmarc.$dom", $dmarc_rec);
+        print($status ne 'error' ? " <span style='color:green'>&#10003;</span>" : " <span style='color:red'>&#10007;</span> $id_or_err");
+        push @fixes, 'dmarc' if $status ne 'error';
     }
     print "</p>";
 }
@@ -101,9 +101,9 @@ if (!$ses_status->{'dmarc'}) {
 # Check SES identity
 if (!$ses_status->{'ses'}) {
     print "<p>$text{'fix_ses_missing'}";
-    my $result = ses_create_identity($dom);
-    print $result->{'ok'} ? " <span style='color:green'>&#10003;</span>" : " <span style='color:red'>&#10007;</span> $result->{'error'}";
-    push @fixes, 'ses' if $result->{'ok'};
+    my ($data, $err) = ses_create_identity($dom);
+    print(!$err ? " <span style='color:green'>&#10003;</span>" : " <span style='color:red'>&#10007;</span> $err");
+    push @fixes, 'ses' if !$err;
     print "</p>";
 }
 

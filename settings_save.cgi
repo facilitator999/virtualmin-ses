@@ -6,22 +6,18 @@ require './virtualmin-ses-lib.pl';
 
 # Handle Postfix reconfigure button
 if ($in{'reconfig_postfix'}) {
-    my $result = configure_postfix_ses($in{'aws_region'} || $config{'aws_region'} || 'eu-west-1');
-    if ($result->{'ok'}) {
-        &redirect("settings.cgi");
-    } else {
-        &error($result->{'error'});
-    }
+    configure_postfix_ses($in{'aws_region'} || $config{'aws_region'} || 'eu-west-1');
+    &redirect("settings.cgi");
     return;
 }
 
 # Handle Postfix restore button
 if ($in{'restore_postfix'}) {
-    my $result = restore_postfix_backup();
-    if ($result->{'ok'}) {
+    my ($ok, $err) = restore_postfix_backup();
+    if ($ok) {
         &redirect("settings.cgi");
     } else {
-        &error($result->{'error'});
+        &error($err);
     }
     return;
 }
@@ -32,18 +28,18 @@ if ($in{'aws_access_key'} && $in{'aws_secret_key'}) {
     $config{'aws_access_key'} = $in{'aws_access_key'};
     $config{'aws_secret_key'} = $in{'aws_secret_key'};
     $config{'aws_region'} = $in{'aws_region'};
-    my $result = ses_test_credentials();
-    if (!$result->{'ok'}) {
-        &error($text{'settings_err_aws'} . ": " . $result->{'error'});
+    my ($data, $err) = ses_test_credentials();
+    if ($err) {
+        &error($text{'settings_err_aws'} . ": " . $err);
     }
 }
 
 # Validate Cloudflare token if provided
 if ($in{'cf_api_token'}) {
     $config{'cf_api_token'} = $in{'cf_api_token'};
-    my $result = cf_test_credentials();
-    if (!$result->{'ok'}) {
-        &error($text{'settings_err_cf'} . ": " . $result->{'error'});
+    my ($ok, $err, $zones) = cf_test_credentials();
+    if ($err) {
+        &error($text{'settings_err_cf'} . ": " . $err);
     }
 }
 
@@ -60,7 +56,7 @@ $config{'dmarc_rua'} = $in{'dmarc_rua'};
 # If AWS credentials changed and Postfix is configured, update SASL
 if ($in{'aws_access_key'} && $in{'aws_secret_key'}) {
     my $pf_status = get_postfix_ses_status();
-    if ($pf_status->{'routing'}) {
+    if ($pf_status->{'routing_configured'}) {
         # Update SASL credentials
         my $smtp_pass = ses_derive_smtp_credentials($in{'aws_secret_key'}, $in{'aws_region'});
         my $smtp_endpoint = get_ses_smtp_endpoint($in{'aws_region'});

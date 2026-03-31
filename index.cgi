@@ -22,31 +22,31 @@ print &ui_link("view_log.cgi", $text{'log_title'});
 print "</div>";
 
 # Health status bar
-my $health = ses_get_account_health();
-if ($health->{'ok'}) {
+my ($health, $health_err) = ses_get_account_health();
+if ($health && !$health_err) {
     print &ui_table_start(undef, "width=100%", 4);
 
     # Connection status
     my $aws_status = "<span style='color:green'>&#10003;</span> AWS SES: Connected ($config{'aws_region'})";
-    my $mode = $health->{'production'} ? 'Production' : "<span style='color:#856404'>$text{'health_sandbox'}</span>";
+    my $mode = $health->{'sandbox'} ? "<span style='color:#856404'>$text{'health_sandbox'}</span>" : 'Production';
     print &ui_table_row(undef, "$aws_status &nbsp;|&nbsp; $mode", 2);
 
     # CF status
     my $cf_status = "";
     if ($config{'cf_api_token'}) {
-        my $cf = cf_test_credentials();
-        if ($cf->{'ok'}) {
-            $cf_status = "<span style='color:green'>&#10003;</span> Cloudflare: Valid ($cf->{'zones'} zones)";
+        my ($cf_ok, $cf_err, $cf_zones) = cf_test_credentials();
+        if ($cf_ok && !$cf_err) {
+            $cf_status = "<span style='color:green'>&#10003;</span> Cloudflare: Valid ($cf_zones zones)";
         } else {
-            $cf_status = "<span style='color:red'>&#10007;</span> Cloudflare: $cf->{'error'}";
+            $cf_status = "<span style='color:red'>&#10007;</span> Cloudflare: $cf_err";
         }
     } else {
         $cf_status = "<span style='color:grey'>&#8212;</span> Cloudflare: Not configured";
     }
 
     # Sending stats
-    my $sent = $health->{'sent24hr'} || 0;
-    my $max = $health->{'max24hr'} || 0;
+    my $sent = $health->{'sent_24h'} || 0;
+    my $max = $health->{'max_24h'} || 0;
     my $sending = "Sending: $sent/$max today";
     print &ui_table_row(undef, "$cf_status &nbsp;|&nbsp; $sending", 2);
 
@@ -69,7 +69,7 @@ if ($health->{'ok'}) {
     print &ui_table_end();
 
     # Warnings
-    if ($health->{'suspended'}) {
+    if (!$health->{'sending_enabled'}) {
         print "<div style='background:#f8d7da;color:#721c24;padding:10px;border-radius:4px;margin:10px 0'>";
         print "<b>$text{'health_alert_suspended'}</b></div>";
     }
@@ -131,49 +131,52 @@ foreach my $dom (sort @domains) {
         ]);
     } elsif ($state->{'paused'}) {
         # PAUSED state
-        my $ses_status = get_domain_ses_status($dom);
-        my $provider = detect_mail_provider($dom);
+        my $s = get_domain_ses_status($dom);
+        my $provider = $s->{'mail_provider'} || detect_mail_provider($dom);
         $status = "<span style='color:orange'>$text{'status_paused'}</span>";
         $status_msg = "<br><small>$text{'paused_msg'}</small>";
         @buttons = (
             "<a href='pause_domain.cgi?dom=$dom&action=resume'>$text{'btn_resume'}</a>",
             "<a href='disable_domain.cgi?dom=$dom'>$text{'btn_disable'}</a>"
         );
+        my $dkim_s = $s->{'dkim_status'} || '';
         print &ui_columns_row([
             "<b>$dom</b>$status_msg",
-            $ses_status->{'ses'} ? $icon_yes : $icon_no,
-            $ses_status->{'dkim'} eq 'SUCCESS' ? $icon_yes : ($ses_status->{'dkim'} eq 'PENDING' ? $icon_pending : $icon_no),
-            $ses_status->{'spf'} ? $icon_yes : $icon_warn,
-            $ses_status->{'dmarc'} ? $icon_yes : $icon_warn,
-            $ses_status->{'cf'} ? $icon_yes : "<span style='color:grey'>&#10007;</span>",
+            $s->{'ses_exists'} ? $icon_yes : $icon_no,
+            $dkim_s eq 'SUCCESS' ? $icon_yes : ($dkim_s eq 'PENDING' ? $icon_pending : $icon_no),
+            $s->{'spf_ok'} ? $icon_yes : $icon_warn,
+            $s->{'dmarc_ok'} ? $icon_yes : $icon_warn,
+            $s->{'on_cloudflare'} ? $icon_yes : "<span style='color:grey'>&#10007;</span>",
             $provider,
             $status,
             join(" &nbsp; ", @buttons)
         ]);
     } else {
         # ENABLED state — check full status
-        my $ses_status = get_domain_ses_status($dom);
-        my $provider = detect_mail_provider($dom);
+        my $s = get_domain_ses_status($dom);
+        my $provider = $s->{'mail_provider'} || detect_mail_provider($dom);
+        my $dkim_s = $s->{'dkim_status'} || '';
 
-        my $ses_icon = $ses_status->{'ses'} ? $icon_yes : $icon_no;
+        my $ses_icon = $s->{'ses_exists'} ? $icon_yes : $icon_no;
         my $dkim_icon;
-        if ($ses_status->{'dkim'} eq 'SUCCESS') {
+        if ($dkim_s eq 'SUCCESS') {
             $dkim_icon = $icon_yes;
-        } elsif ($ses_status->{'dkim'} eq 'PENDING') {
+        } elsif ($dkim_s eq 'PENDING') {
             $dkim_icon = $icon_pending;
         } else {
             $dkim_icon = "<span style='color:red'>&#10007;</span>";
         }
-        my $spf_icon = $ses_status->{'spf'} ? $icon_yes : $icon_warn;
-        my $dmarc_icon = $ses_status->{'dmarc'} ? $icon_yes : $icon_warn;
-        my $cf_icon = $ses_status->{'cf'} ? $icon_yes : "<span style='color:grey'>&#10007;</span>";
+        my $spf_icon = $s->{'spf_ok'} ? $icon_yes : $icon_warn;
+        my $dmarc_icon = $s->{'dmarc_ok'} ? $icon_yes : $icon_warn;
+        my $cf_icon = $s->{'on_cloudflare'} ? $icon_yes : "<span style='color:grey'>&#10007;</span>";
 
-        # Determine overall status
+        # Use overall from status check
+        my $overall_status = $s->{'overall'} || 'UNKNOWN';
         my $overall;
         my $enabled_ts = $state->{'enabled_at'} || 0;
         my $elapsed = time() - $enabled_ts;
 
-        if ($ses_status->{'dkim'} eq 'PENDING') {
+        if ($overall_status eq 'PENDING') {
             $overall = "<span style='color:orange'>$text{'status_pending'}</span>";
             my $hours = int($elapsed / 3600);
             my $time_str = $hours > 24 ? int($hours/24) . "d" : "${hours}h";
@@ -183,7 +186,7 @@ foreach my $dom (sort @domains) {
                 "<a href='disable_domain.cgi?dom=$dom'>$text{'btn_disable'}</a>",
                 "<a href='index.cgi'>$text{'btn_recheck'}</a>"
             );
-        } elsif ($ses_status->{'dkim'} eq 'SUCCESS' && $ses_status->{'spf'} && $ses_status->{'ses'}) {
+        } elsif ($overall_status eq 'READY') {
             $overall = "<span style='color:green'><b>$text{'status_ready'}</b></span>";
             @buttons = (
                 "<a href='pause_domain.cgi?dom=$dom&action=pause'>$text{'btn_pause'}</a>",
@@ -191,8 +194,7 @@ foreach my $dom (sort @domains) {
                 "<a href='test_email.cgi?dom=$dom'>$text{'btn_test'}</a>",
                 "<a href='view_backup.cgi?dom=$dom'>$text{'btn_backup'}</a>"
             );
-        } elsif (!$ses_status->{'cf'}) {
-            # Non-Cloudflare domain — manual DNS
+        } elsif ($overall_status eq 'MANUAL_DNS') {
             my $dns_prov = get_dns_provider($dom);
             $overall = "<span style='color:#856404'>$text{'status_manual'}</span>";
             $status_msg = "<br><small>" . &text('manual_msg', $dns_prov) . "</small>";
@@ -204,6 +206,8 @@ foreach my $dom (sort @domains) {
             );
         } else {
             $overall = "<span style='color:red'>$text{'status_attention'}</span>";
+            my $issues_str = join(", ", @{$s->{'issues'} || []});
+            $status_msg = "<br><small>$issues_str</small>" if $issues_str;
             @buttons = (
                 "<a href='fix_domain.cgi?dom=$dom'>$text{'btn_fix'}</a>",
                 "<a href='pause_domain.cgi?dom=$dom&action=pause'>$text{'btn_pause'}</a>",

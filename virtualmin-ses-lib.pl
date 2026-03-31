@@ -36,9 +36,9 @@ sub ensure_dirs {
 
 sub aws_sign_v4 {
     my ($method, $service, $region, $path, $query, $headers_ref, $payload,
-        $access_key, $secret_key) = @_;
+        $access_key, $secret_key, $host_override) = @_;
 
-    my $host = "$service.$region.amazonaws.com";
+    my $host = $host_override || "$service.$region.amazonaws.com";
     my $now = strftime("%Y%m%dT%H%M%SZ", gmtime());
     my $date = substr($now, 0, 8);
 
@@ -108,9 +108,10 @@ sub ses_api_call {
     my %headers = ('content-type' => 'application/json');
     my $payload = $body ? encode_json($body) : '';
 
+    my $host = "email.$region.amazonaws.com";
     my ($auth, $amz_date) = aws_sign_v4(
-        $method, 'email', $region, "/v2$path", $query || '',
-        \%headers, $payload, $access_key, $secret_key
+        $method, 'ses', $region, "/v2$path", $query || '',
+        \%headers, $payload, $access_key, $secret_key, $host
     );
 
     my $url = ses_endpoint() . "/v2$path";
@@ -175,7 +176,7 @@ sub ses_list_identities {
 }
 
 sub ses_test_credentials {
-    my ($data, $err) = ses_api_call('GET', '/account');
+    my ($data, $err) = ses_api_call('GET', '/email/account');
     return (undef, $err) if $err;
     return ($data, undef);
 }
@@ -249,7 +250,7 @@ sub ses_derive_smtp_credentials {
 }
 
 sub ses_get_suppression_list {
-    my ($data, $err) = ses_api_call('GET', '/suppression/addresses',
+    my ($data, $err) = ses_api_call('GET', '/email/suppression/addresses',
         undef, 'PageSize=100');
     return ([], $err) if $err;
     my @addresses;
@@ -265,7 +266,7 @@ sub ses_get_suppression_list {
 sub ses_delete_suppressed {
     my ($email) = @_;
     my $encoded = uri_escape($email);
-    return ses_api_call('DELETE', "/suppression/addresses/$encoded");
+    return ses_api_call('DELETE', "/email/suppression/addresses/$encoded");
 }
 
 #######################################################################
@@ -435,7 +436,7 @@ sub get_server_ip {
             }
         }
     };
-    return $ip || '195.201.245.46'; # last resort fallback
+    return $ip || '127.0.0.1';
 }
 
 sub build_dkim_cnames {
@@ -589,10 +590,10 @@ sub get_dns_provider {
         if ($reply) {
             my @ns = map { $_->nsdname }
                      grep { $_->type eq 'NS' } $reply->answer;
-            return @ns if @ns;
+            return join(', ', @ns) if @ns;
         }
     }
-    return ();
+    return 'Unknown';
 }
 
 #######################################################################
@@ -1234,7 +1235,14 @@ sub get_recent_mail_log {
                 $entry{relay} = $1;
             }
 
-            push @entries, \%entry;
+            # Format as readable string
+            my $formatted = "$timestamp $component: ";
+            $formatted .= "from=<$entry{from}> " if $entry{from};
+            $formatted .= "to=<$entry{to}> " if $entry{to};
+            $formatted .= "status=$entry{status} " if $entry{status};
+            $formatted .= "relay=$entry{relay}" if $entry{relay};
+            $formatted = "$timestamp $component: $detail" unless ($entry{from} || $entry{to} || $entry{status});
+            push @entries, $formatted;
         }
     }
 
@@ -1250,20 +1258,14 @@ sub get_virtualmin_domains {
     eval {
         &foreign_require("virtual-server", "virtual-server-lib.pl");
         foreach my $d (&virtual_server::list_domains()) {
-            push @domains, {
-                dom => $d->{'dom'},
-                user => $d->{'user'},
-                home => $d->{'home'},
-                alias => $d->{'alias'} ? 1 : 0,
-            };
+            push @domains, $d->{'dom'} if $d->{'dom'};
         }
     };
     if ($@) {
         # Fallback to CLI
-        my @names = split(/\n/, `virtualmin list-domains --name-only 2>/dev/null`);
-        @domains = map { { dom => $_, alias => 0 } } @names;
+        @domains = split(/\n/, `virtualmin list-domains --name-only 2>/dev/null`);
     }
-    return @domains;
+    return grep { defined $_ && $_ ne '' } @domains;
 }
 
 1;

@@ -15,7 +15,7 @@ if (!$in{'confirm'}) {
     if ($backup) {
         print "<p><b>$text{'disable_diff'}:</b></p>";
         my $diff = diff_dns_backup($dom);
-        if ($diff && @$diff) {
+        if ($diff && ref($diff) eq 'ARRAY' && @$diff) {
             print "<pre style='background:#f5f5f5;padding:10px;border-radius:4px'>";
             foreach my $d (@$diff) {
                 print &html_escape($d) . "\n";
@@ -39,14 +39,13 @@ if (!$in{'confirm'}) {
 
 # Step 1: Remove from transport map
 print "<p>$text{'disable_transport'}";
-my $t_result = remove_domain_from_transport($dom);
-print($t_result->{'ok'} ? " <span style='color:green'>&#10003;</span>" : " <span style='color:orange'>&#9888;</span>");
-print "</p>";
+remove_domain_from_transport($dom);
+print " <span style='color:green'>&#10003;</span></p>";
 
 # Step 2: Remove SES identity
 print "<p>$text{'disable_identity'}";
-my $ses_result = ses_delete_identity($dom);
-print($ses_result->{'ok'} ? " <span style='color:green'>&#10003;</span>" : " <span style='color:orange'>&#9888;</span>");
+my ($del_data, $del_err) = ses_delete_identity($dom);
+print($del_err ? " <span style='color:orange'>&#9888;</span> $del_err" : " <span style='color:green'>&#10003;</span>");
 print "</p>";
 
 # Step 3: Restore DNS from backup
@@ -54,8 +53,8 @@ my $state = get_domain_state($dom);
 my $cf_zone = $state->{'cf_zone'};
 if ($cf_zone) {
     print "<p>$text{'disable_dns'}";
-    my $restore_result = restore_domain_dns($dom, $cf_zone);
-    print($restore_result->{'ok'} ? " <span style='color:green'>&#10003;</span>" : " <span style='color:orange'>&#9888;</span> $restore_result->{'error'}");
+    my ($ok, $err) = restore_domain_dns($dom, $cf_zone);
+    print($ok ? " <span style='color:green'>&#10003;</span>" : " <span style='color:orange'>&#9888;</span> $err");
     print "</p>";
 }
 

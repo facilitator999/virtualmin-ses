@@ -20,15 +20,17 @@ if ($in{'send'}) {
     print "<p>Sending test email from $from to $to...</p>";
     my $result = send_test_email($from, $to);
 
-    if ($result->{'ok'}) {
+    if ($result->{'success'}) {
         print "<p style='color:green'><b>$text{'test_success'}</b></p>";
     } else {
-        print "<p style='color:red'><b>" . &text('test_fail', $result->{'error'}) . "</b></p>";
+        print "<p style='color:red'><b>" . &text('test_fail', $result->{'output'} || 'Unknown error') . "</b></p>";
     }
 
-    if ($result->{'log'}) {
+    if ($result->{'log'} && ref($result->{'log'}) eq 'ARRAY' && @{$result->{'log'}}) {
         print "<pre style='background:#f5f5f5;padding:10px;border-radius:4px;font-size:12px'>";
-        print &html_escape($result->{'log'});
+        foreach my $entry (@{$result->{'log'}}) {
+            print &html_escape($entry) . "\n";
+        }
         print "</pre>";
     }
 } else {
@@ -51,7 +53,6 @@ if ($in{'send'}) {
 
     print &ui_table_start(undef, "width=100%", 2);
 
-    # Default to the domain from URL param
     my $default_dom = $dom || $enabled[0];
     print &ui_table_row($text{'test_from'},
         &ui_select("from_domain", $default_dom, [map { [$_, $_] } @enabled]));
