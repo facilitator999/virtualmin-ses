@@ -92,6 +92,49 @@ print "</div>";
 # Get all Virtualmin domains
 my @domains = get_virtualmin_domains();
 
+# Pre-fetch all Cloudflare zones in one API call, then records per zone
+my %cf_zone_map;    # domain => zone_id
+my %cf_records;     # domain => { spf => [...], dmarc => [...], dkim => [...] }
+if ($config{'cf_api_token'}) {
+    # Get all zones (one call)
+    my ($zdata, $zerr) = cf_api_call('GET', 'zones?per_page=50');
+    if ($zdata && $zdata->{result}) {
+        my %zone_records_cache;  # zone_id => [records]
+        foreach my $zone (@{$zdata->{result}}) {
+            $zone_records_cache{$zone->{id}} = undef;  # lazy load
+        }
+
+        # Match domains to zones
+        foreach my $dom (@domains) {
+            foreach my $zone (@{$zdata->{result}}) {
+                if ($dom eq $zone->{name} || $dom =~ /\.\Q$zone->{name}\E$/) {
+                    $cf_zone_map{$dom} = $zone->{id};
+                    last;
+                }
+            }
+        }
+
+        # Fetch records per zone (one call per zone, not per domain)
+        my %fetched_zones;
+        foreach my $dom (keys %cf_zone_map) {
+            my $zid = $cf_zone_map{$dom};
+            unless ($fetched_zones{$zid}) {
+                my ($rdata, $rerr) = cf_api_call('GET', "zones/$zid/dns_records?per_page=500");
+                $fetched_zones{$zid} = $rdata->{result} || [] if !$rerr;
+                $fetched_zones{$zid} ||= [];
+            }
+            # Extract relevant records for this domain
+            my @all = @{$fetched_zones{$zid}};
+            $cf_records{$dom} = {
+                spf => [grep { $_->{type} eq 'TXT' && $_->{name} eq $dom && $_->{content} =~ /v=spf1/i } @all],
+                dmarc => [grep { $_->{type} eq 'TXT' && $_->{name} eq "_dmarc.$dom" } @all],
+                dkim => [grep { $_->{type} eq 'CNAME' && $_->{name} =~ /\._domainkey\.\Q$dom\E$/i } @all],
+                dkim_txt => [grep { $_->{type} eq 'TXT' && $_->{name} =~ /\._domainkey\.\Q$dom\E$/i } @all],
+            };
+        }
+    }
+}
+
 # Domain table
 print &ui_columns_start([
     $text{'domain_col'},
@@ -117,9 +160,63 @@ foreach my $dom (sort @domains) {
     my $icon_warn = "<span style='color:orange'>&#63;</span>";
 
     if (!$state || !$state->{'enabled'}) {
-        # DISABLED state
-        my ($ses_col, $dkim_col, $spf_col, $dmarc_col, $cf_col) = ($icon_no, $icon_no, $icon_no, $icon_no, $icon_no);
+        # DISABLED state — only show for Local mail provider domains
         my $provider = detect_mail_provider($dom);
+        my $ses_col = $icon_no;
+        my $dkim_col = $icon_no;
+        my $spf_col = $icon_no;
+        my $dmarc_col = $icon_no;
+        my $cf_col = $icon_no;
+
+        # Check DNS using pre-fetched Cloudflare data (fast — already cached)
+        if ($cf_zone_map{$dom} && $cf_records{$dom}) {
+            $cf_col = $icon_yes;
+            my $r = $cf_records{$dom};
+
+            # DKIM — check if any _domainkey CNAME or TXT exists in CF
+            $dkim_col = (@{$r->{dkim}} || @{$r->{dkim_txt}}) ? $icon_yes : $icon_no;
+
+            # SPF — check if valid SPF record exists
+            $spf_col = @{$r->{spf}} ? $icon_yes : $icon_no;
+
+            # DMARC — check if DMARC record exists
+            $dmarc_col = @{$r->{dmarc}} ? $icon_yes : $icon_no;
+        } else {
+            # Not on Cloudflare — use DNS resolver (fast, 2s timeout)
+            eval {
+                my $res = Net::DNS::Resolver->new(udp_timeout => 2, tcp_timeout => 2);
+
+                # DKIM — check common selectors
+                my $dkim_found = 0;
+                for my $sel ('202410', 'default', 'selector1', 'google', 'dkim') {
+                    my $r = $res->query("${sel}._domainkey.$dom", 'TXT')
+                          || $res->query("${sel}._domainkey.$dom", 'CNAME');
+                    if ($r) { $dkim_found = 1; last; }
+                }
+                $dkim_col = $dkim_found ? $icon_yes : $icon_no;
+
+                # SPF
+                my $spf_reply = $res->query($dom, 'TXT');
+                if ($spf_reply) {
+                    foreach my $rr ($spf_reply->answer) {
+                        if ($rr->type eq 'TXT' && $rr->txtdata =~ /v=spf1/i) {
+                            $spf_col = $icon_yes; last;
+                        }
+                    }
+                }
+
+                # DMARC
+                my $dmarc_reply = $res->query("_dmarc.$dom", 'TXT');
+                if ($dmarc_reply) {
+                    foreach my $rr ($dmarc_reply->answer) {
+                        if ($rr->type eq 'TXT' && $rr->txtdata =~ /v=DMARC1/i) {
+                            $dmarc_col = $icon_yes; last;
+                        }
+                    }
+                }
+            };
+        }
+
         $status = "<span style='color:grey'>$text{'status_disabled'}</span>";
         @buttons = ("<a href='enable_domain.cgi?dom=$dom'>$text{'btn_enable'}</a>");
         print &ui_columns_row([

@@ -1,7 +1,7 @@
 aws_access_key=AWS Access Key ID,0
-aws_secret_key=AWS Secret Access Key,0
+aws_secret_key=AWS Secret Access Key,12
 aws_region=AWS SES Region,3,eu-west-1,us-east-1,us-west-2,eu-west-1,eu-central-1,ap-south-1,ap-southeast-2
-cf_api_token=Cloudflare API Token,0
+cf_api_token=Cloudflare API Token,12
 spf_include=SPF include value for SES,0
 dmarc_policy=Default DMARC policy,1,none-None (monitoring),quarantine-Quarantine,reject-Reject
 dmarc_rua=DMARC aggregate report email,0
