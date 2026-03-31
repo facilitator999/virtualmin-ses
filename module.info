@@ -1,0 +1,6 @@
+desc=AWS SES Email Delivery
+longdesc=Manage AWS SES email delivery and Cloudflare DNS for all Virtualmin domains from a single dashboard
+category=servers
+depends=virtual-server postfix
+version=1.0.0
+os_support=*-linux

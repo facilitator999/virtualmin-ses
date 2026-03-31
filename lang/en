@@ -1,0 +1,152 @@
+index_title=AWS SES Email Delivery
+index_desc=Manage email delivery through Amazon SES for your Virtualmin domains
+index_settings=Settings
+index_help=Help
+index_emergency=Emergency Disable All
+index_emergency_desc=Remove all SES routing instantly (keeps identities for re-enable)
+index_refresh=Refresh Status
+index_noconfig=AWS credentials not configured. Go to Settings to enter your API keys.
+
+settings_title=Settings
+settings_aws_header=AWS SES API
+settings_aws_key=Access Key ID
+settings_aws_secret=Secret Access Key
+settings_aws_region=Region
+settings_aws_test=Test Connection
+settings_aws_smtp=SMTP credentials: auto-derived from IAM key
+settings_aws_status=SES Account Status
+settings_aws_quota=Sending Quota
+settings_cf_header=Cloudflare API
+settings_cf_token=API Token
+settings_cf_test=Test Connection
+settings_cf_zones=Zones accessible
+settings_cf_expiry=Token expires
+settings_defaults_header=Email Defaults
+settings_spf=SPF include value
+settings_dmarc_policy=DMARC policy
+settings_dmarc_rua=DMARC report email (optional)
+settings_server_ip=Server IP for SPF (auto-detected)
+settings_postfix_header=Postfix Relay Status
+settings_postfix_routing=Per-domain routing
+settings_postfix_sasl=SASL auth
+settings_postfix_tls=TLS
+settings_postfix_dane=DANE/DNSSEC
+settings_postfix_dkim=OpenDKIM
+settings_postfix_backup=Postfix backup
+settings_postfix_reconfig=Reconfigure Postfix
+settings_postfix_restore=Restore Original Postfix Config
+settings_sandbox_header=SES Production Access
+settings_sandbox_warn=Your SES account is in SANDBOX mode. You can only send to verified email addresses.
+settings_sandbox_request=To send to anyone, request production access from AWS.
+settings_sandbox_template=Copy Template for AWS Application
+settings_save=Save Settings
+settings_saved=Settings saved successfully.
+settings_err_aws=AWS SES credentials are invalid
+settings_err_cf=Cloudflare API token is invalid
+
+domain_col=Domain
+ses_col=SES
+dkim_col=DKIM
+spf_col=SPF
+dmarc_col=DMARC
+cf_col=CF?
+provider_col=Mail Provider
+status_col=Status
+
+status_ready=READY
+status_pending=PENDING
+status_attention=NEEDS ATTENTION
+status_manual=MANUAL DNS
+status_disabled=DISABLED
+status_paused=PAUSED
+
+btn_enable=Enable
+btn_disable=Disable
+btn_pause=Pause
+btn_resume=Resume
+btn_fix=Fix
+btn_test=Test Email
+btn_backup=View Backup
+btn_recheck=Re-check
+btn_checkdns=Check DNS
+btn_showrecords=Show Required Records
+
+enable_title=Enable SES for $1
+enable_backup=Backing up existing DNS records...
+enable_create=Creating SES identity...
+enable_dkim=Retrieving DKIM tokens...
+enable_dns=Pushing DNS records to Cloudflare...
+enable_transport=Adding to Postfix transport map...
+enable_opendkim=Disabling OpenDKIM signing for this domain...
+enable_done=SES enabled for $1. DKIM verification typically takes 24-72 hours.
+enable_err_creds=AWS credentials not configured. Go to Settings first.
+enable_err_create=Failed to create SES identity: $1
+enable_err_dns=Failed to push DNS records: $1. Rolling back...
+enable_err_exists=SES identity already exists for $1 — verifying...
+
+disable_title=Disable SES for $1
+disable_confirm=This will delete the SES identity and restore original DNS. DKIM re-verification takes 24-72h if you re-enable later. Continue?
+disable_diff=DNS changes since backup
+disable_transport=Removing from Postfix transport map...
+disable_identity=Removing SES identity...
+disable_dns=Restoring DNS from backup...
+disable_done=SES disabled for $1. Domain now uses server defaults.
+
+pause_title=Pause SES for $1
+pause_done=SES routing paused for $1. Identity and DNS preserved. Click Resume to restore.
+
+resume_done=SES routing resumed for $1.
+
+test_title=Send Test Email
+test_from=From domain
+test_to=Send to address
+test_send=Send Test
+test_result=Result
+test_success=Test email sent successfully via SES
+test_fail=Test email failed: $1
+
+log_title=Mail Log
+log_domain=Filter by domain
+log_all=All domains
+log_recent=Recent entries
+
+fix_title=Fix $1
+fix_dkim_pending=DKIM verification is pending. Started $1 ago — typically takes 24-72 hours. Nothing to fix yet.
+fix_dkim_failed=DKIM verification failed. Re-pushing CNAME records...
+fix_spf_wrong=SPF record incorrect. Expected to include $1. Updating...
+fix_dmarc_missing=DMARC record missing. Creating...
+fix_ses_missing=SES identity missing. Re-creating...
+fix_cf_error=Cloudflare API error: $1. Check your token in Settings.
+fix_done=Fixes applied for $1.
+
+emergency_title=Emergency Disable
+emergency_confirm=This will remove ALL SES routing immediately. SES identities and DNS records will be preserved. Continue?
+emergency_done=All SES routing disabled. Domains now deliver directly. Click Resume on individual domains to re-enable.
+
+backup_title=DNS Backup for $1
+backup_taken=Backup taken on $1
+backup_current=Current DNS
+backup_original=Original DNS (from backup)
+backup_diff=Changes since backup
+backup_nobackup=No backup exists for this domain.
+
+health_bounce=Bounce rate
+health_complaint=Complaint rate
+health_quota=Sending today
+health_sandbox=SANDBOX
+health_production=Production
+health_suspended=SENDING SUSPENDED
+health_warn_bounce=Bounce rate approaching 5% threshold — SES may suspend sending
+health_warn_complaint=Complaint rate approaching 0.1% threshold — SES may suspend sending
+health_alert_suspended=SES sending has been suspended! Use Emergency Disable to fall back to direct delivery.
+
+provider_local=Local
+provider_zoho=Zoho Mail
+provider_google=Google Workspace
+provider_microsoft=Microsoft 365
+provider_rackspace=Rackspace
+provider_proofpoint=Proofpoint
+
+pending_msg=Enabled $1 ago — DKIM verification typically takes 24-72h
+paused_msg=Routing paused — mail delivers directly
+manual_msg=DNS provider: $1

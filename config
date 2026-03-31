@@ -1,0 +1,9 @@
+aws_access_key=
+aws_secret_key=
+aws_region=eu-west-1
+cf_api_token=
+spf_include=amazonses.com
+dmarc_policy=none
+dmarc_rua=
+dmarc_pct=100
+postfix_configured=0
