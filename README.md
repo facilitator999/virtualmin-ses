@@ -1,13 +1,15 @@
 # Virtualmin SES — AWS SES Email Delivery Plugin
 
-A Webmin/Virtualmin plugin that manages **AWS SES email delivery** and **Cloudflare DNS** for all your domains from a single dashboard. One-click enable per domain — handles DKIM, SPF, DMARC, and Postfix routing automatically.
+A Webmin/Virtualmin plugin that manages **AWS SES email delivery** and **Cloudflare DNS** for all your domains from a single dashboard. One-click enable per domain — automatically populates DKIM, SPF, and DMARC records in Cloudflare, configures Postfix routing, and validates everything. It's an all-in-one DNS validator and email delivery manager.
 
 ## What It Does
 
+- **Automatic DNS population** — creates DKIM, SPF, and DMARC records in Cloudflare automatically, no manual record editing needed
+- **All-in-one DNS validator** — dashboard shows DKIM, SPF, DMARC, and Cloudflare status for every domain at a glance, whether SES-enabled or not
 - **Per-domain SES routing** — only enabled domains route through SES, everything else stays unchanged
-- **Automatic DNS** — pushes DKIM, SPF, and DMARC records to Cloudflare automatically
 - **DNS backup/restore** — backs up your DNS before making changes, restores on disable
 - **Three states per domain**: Disabled (default), Enabled (routing through SES), Paused (keeps DNS/identity, stops routing)
+- **Smart caching** — dashboard loads instantly from cache, refreshes every hour or on demand
 - **Third-party email detection** — detects Google Workspace, Microsoft 365, Zoho, etc. via MX records
 - **Bounce/complaint monitoring** — shows SES health metrics, warns before thresholds
 - **Emergency disable** — one click removes all SES routing instantly
