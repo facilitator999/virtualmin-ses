@@ -4,6 +4,8 @@
 require './virtualmin-ses-lib.pl';
 &ReadParse();
 
+clear_dashboard_cache();
+
 # Handle Postfix reconfigure button
 if ($in{'reconfig_postfix'}) {
     configure_postfix_ses($in{'aws_region'} || $config{'aws_region'} || 'eu-west-1');

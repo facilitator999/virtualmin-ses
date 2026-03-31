@@ -7,6 +7,8 @@ require './virtualmin-ses-lib.pl';
 my $dom = $in{'dom'} || &error("No domain specified");
 my $action = $in{'action'} || 'fix';
 
+clear_dashboard_cache();
+
 ui_print_header(undef, &text('fix_title', $dom), "");
 
 my $state = get_domain_state($dom);

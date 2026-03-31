@@ -7,6 +7,8 @@ require './virtualmin-ses-lib.pl';
 my $dom = $in{'dom'} || &error("No domain specified");
 my $action = $in{'action'} || 'pause';
 
+clear_dashboard_cache();
+
 if ($action eq 'resume') {
     # Resume: add back to transport map
     my $result = add_domain_to_transport($dom);

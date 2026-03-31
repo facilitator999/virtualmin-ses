@@ -37,6 +37,8 @@ if (!$in{'confirm'}) {
     exit;
 }
 
+clear_dashboard_cache();
+
 # Step 1: Remove from transport map
 print "<p>$text{'disable_transport'}";
 remove_domain_from_transport($dom);

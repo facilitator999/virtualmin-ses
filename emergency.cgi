@@ -27,6 +27,8 @@ if (!$in{'confirm'}) {
     exit;
 }
 
+clear_dashboard_cache();
+
 # Do the emergency disable
 print "<p>Removing all SES routing...</p>";
 my $result = remove_all_from_transport();

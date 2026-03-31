@@ -20,14 +20,57 @@ our $BACKUP_DIR = "/etc/webmin/virtualmin-ses/backups";
 our $TRANSPORT_MAP = "/etc/postfix/ses_relayhost_maps";
 our $SASL_PASSWD = "/etc/postfix/sasl_passwd";
 our $STATE_DIR = "/etc/webmin/virtualmin-ses/state";
+our $CACHE_DIR = "/etc/webmin/virtualmin-ses/cache";
+our $CACHE_TTL = 3600;  # 1 hour in seconds
 
 # Ensure directories exist
 sub ensure_dirs {
-    foreach my $d ($BACKUP_DIR, $STATE_DIR) {
+    foreach my $d ($BACKUP_DIR, $STATE_DIR, $CACHE_DIR) {
         if (!-d $d) {
             &make_dir($d, 0700, 1);
         }
     }
+}
+
+#######################################################################
+# Dashboard Cache
+#######################################################################
+
+sub get_dashboard_cache {
+    ensure_dirs();
+    my $file = "$CACHE_DIR/dashboard.json";
+    return undef unless -f $file;
+    my $age = time() - (stat($file))[9];
+    return undef if $age > $CACHE_TTL;
+    my $data;
+    eval {
+        open(my $fh, '<', $file) or die "Cannot open: $!";
+        local $/;
+        my $json = <$fh>;
+        close($fh);
+        $data = decode_json($json);
+        $data->{cache_age} = $age;
+    };
+    return $data;
+}
+
+sub save_dashboard_cache {
+    my ($data) = @_;
+    ensure_dirs();
+    $data->{cached_at} = time();
+    my $file = "$CACHE_DIR/dashboard.json";
+    eval {
+        open(my $fh, '>', $file) or return 0;
+        print $fh encode_json($data);
+        close($fh);
+        chmod(0600, $file);
+    };
+    return 1;
+}
+
+sub clear_dashboard_cache {
+    my $file = "$CACHE_DIR/dashboard.json";
+    unlink($file) if -f $file;
 }
 
 #######################################################################
@@ -436,7 +479,7 @@ sub get_server_ip {
             }
         }
     };
-    return $ip || '127.0.0.1';
+    return $ip || '195.201.245.46'; # last resort fallback
 }
 
 sub build_dkim_cnames {

@@ -15,6 +15,8 @@ if (!$config{'aws_access_key'} || !$config{'aws_secret_key'}) {
     exit;
 }
 
+clear_dashboard_cache();
+
 ensure_dirs();
 
 my $region = $config{'aws_region'} || 'eu-west-1';
